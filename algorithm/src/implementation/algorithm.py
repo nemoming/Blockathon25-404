@@ -7,9 +7,8 @@ from oceanprotocol_job_details.ocean import JobDetails
 import json
 import pandas as pd
 import numpy as np
+import faiss
 from sentence_transformers import SentenceTransformer
-import chromadb
-from chromadb.config import Settings
 # =============================== END ===============================
 
 T = TypeVar("T")
@@ -66,25 +65,15 @@ class Algorithm:
     def _process_enron(self, filepath: str) -> list[str]:
         df = pd.read_csv(filepath)
 
-        # Normalize all column names to lowercase once
-        df.columns = [col.lower() for col in df.columns]
-
+        df = pd.read_csv(filepath, encoding="ISO-8859-1", header=None)
         chunks = []
 
         for _, row in df.iterrows():
-            sender = row.get("x-from", "N/A")
-            recipient = row.get("x-to", "N/A")
-            subject = row.get("x-subject", "No Subject")
-            body = row.get("x-body", row.get("content", "No Body"))
-
-            email = (
-                f"From: {sender}\n"
-                f"To: {recipient}\n"
-                f"Subject: {subject}\n"
-                f"Body:\n{body}"
-            )
-
-            chunks.append(email)
+            if len(row) < 2:
+                continue  # skip malformed
+            raw_email = str(row[1]).strip()
+            if raw_email:
+                chunks.append(raw_email[:3000])  # prevent overlengths
 
         return chunks
 
@@ -102,7 +91,6 @@ class Algorithm:
         # === Step 2: Get the input file ===
         input_files = self._job_details.files.files[0].input_files
         filename = str(input_files[0])
-        source = "gazette" if filename.endswith(".json") else "enron"
         logger.info(f"Input file detected: {filename}")
 
         # === Step 3: Identify dataset and generate text chunks ===
@@ -121,22 +109,16 @@ class Algorithm:
         model = SentenceTransformer("all-MiniLM-L6-v2")
         logger.info("Generating embeddings...")
         embeddings = model.encode(chunks, convert_to_numpy=True)
+        embeddings = np.array(embeddings).astype("float32")  # FAISS requires float32
 
         # === Step 5: Store vectors in ChromaDB ===
         # === Initialize ChromaDB ===
-        client = chromadb.PersistentClient(path="chroma_store")
-        collection = client.get_or_create_collection("archive_chunks")
-
-        logger.info("Inserting into Chroma collection...")
-        metadatas = [{"index": i, "source": source} for i in range(len(chunks))]
-        collection.add(
-            ids=[str(i) for i in range(len(chunks))],
-            documents=chunks,
-            metadatas=metadatas
-)
-
-        #client.persist()
-        logger.info("ChromaDB persisted to disk at ./chroma_store")
+        logger.info("Indexing with FAISS...")
+        dim = embeddings.shape[1]
+        index = faiss.IndexFlatL2(dim)
+        index.add(embeddings)
+        faiss.write_index(index, "faiss_index.bin")
+        logger.info("Saved FAISS index to faiss_index.bin")
 
         # === Save chunks to docstore.json ===
         with open("docstore.json", "w", encoding="utf-8") as f:
@@ -144,12 +126,12 @@ class Algorithm:
         logger.info("Chunk store saved as docstore.json")
 
         # TODO: 5. save results here
-        # === Step 7: Save run result metadata ===
+        # === Step 6: Save run result metadata ===
         self.results = {
             "status": "completed",
             "n_chunks": len(chunks),
             "docstore": "docstore.json",
-            "chroma_store": "chroma_store/"
+            "faiss_index": "faiss_index.bin"
         }
 
         # TODO: 6. return self
@@ -163,8 +145,8 @@ class Algorithm:
         with open(result_path, "w", encoding="utf-8") as f:
             try:
                 # TODO: 8. save results here
-                json.dump(self.results, f, indent=2)
+                with open(result_path, "w", encoding="utf-8") as f:
+                    json.dump(self.results, f, indent=2)
                 logger.info(f"Saved result metadata to {result_path}")
-                pass
             except Exception as e:
                 logger.exception(f"Error saving data: {e}")

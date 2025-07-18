@@ -14,11 +14,10 @@ dependencies = [
     "seaborn>=0.13.2",
     "orjson>=3.10.16",
     "sentence-transformers>=5.0.0",
-    "chromadb>=1.0.15",
     "pytest>=8.4.1",
     "sentence_transformers",
-    "chromadb",
     "numpy",
+    "faiss-cpu"
 ]
 
 [tool.uv]
