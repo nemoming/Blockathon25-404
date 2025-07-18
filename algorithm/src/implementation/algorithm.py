@@ -22,7 +22,7 @@ class Algorithm:
 
     def __init__(self, job_details: JobDetails):
         self._job_details = job_details
-        self.results = Optional[Any] = None
+        self.results = None
 
     def _validate_input(self) -> None:
         if not self._job_details.files or not self._job_details.files.files[0].input_files:
@@ -65,13 +65,17 @@ class Algorithm:
     
     def _process_enron(self, filepath: str) -> list[str]:
         df = pd.read_csv(filepath)
+
+        # Normalize all column names to lowercase once
+        df.columns = [col.lower() for col in df.columns]
+
         chunks = []
 
         for _, row in df.iterrows():
-            sender = row.get("From", "")
-            recipient = row.get("To", "")
-            subject = row.get("Subject", "")
-            body = row.get("Body", "")
+            sender = row.get("x-from", "N/A")
+            recipient = row.get("x-to", "N/A")
+            subject = row.get("x-subject", "No Subject")
+            body = row.get("x-body", row.get("content", "No Body"))
 
             email = (
                 f"From: {sender}\n"
@@ -83,6 +87,7 @@ class Algorithm:
             chunks.append(email)
 
         return chunks
+
    
     def run(self) -> "Algorithm":
         # TODO: 1. Initialize results type 
@@ -97,6 +102,7 @@ class Algorithm:
         # === Step 2: Get the input file ===
         input_files = self._job_details.files.files[0].input_files
         filename = str(input_files[0])
+        source = "gazette" if filename.endswith(".json") else "enron"
         logger.info(f"Input file detected: {filename}")
 
         # === Step 3: Identify dataset and generate text chunks ===
@@ -118,21 +124,18 @@ class Algorithm:
 
         # === Step 5: Store vectors in ChromaDB ===
         # === Initialize ChromaDB ===
-        client = chromadb.Client(Settings(
-            chroma_db_impl="duckdb+parquet",
-            persist_directory="chroma_store"
-        ))
-
-        collection = client.create_collection(name="archive_chunks")
+        client = chromadb.PersistentClient(path="chroma_store")
+        collection = client.get_or_create_collection("archive_chunks")
 
         logger.info("Inserting into Chroma collection...")
+        metadatas = [{"index": i, "source": source} for i in range(len(chunks))]
         collection.add(
             ids=[str(i) for i in range(len(chunks))],
             documents=chunks,
-            metadatas = [{"index": i, "source": "gazette"} for i in range(len(chunks))]
-        )
+            metadatas=metadatas
+)
 
-        client.persist()
+        #client.persist()
         logger.info("ChromaDB persisted to disk at ./chroma_store")
 
         # === Save chunks to docstore.json ===

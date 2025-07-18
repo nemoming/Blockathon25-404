@@ -7,7 +7,6 @@ requires-python = ">=3.10"
 readme = "README.md"
 license = { file = "LICENSE" }
 dependencies = [
-    "pytest==8.3.4",
     "oceanprotocol-job-details==0.1.0",
     "scikit-learn>=1.6.1,<2",
     "pandas>=2.2.3,<3",
@@ -16,6 +15,10 @@ dependencies = [
     "orjson>=3.10.16",
     "sentence-transformers>=5.0.0",
     "chromadb>=1.0.15",
+    "pytest>=8.4.1",
+    "sentence_transformers",
+    "chromadb",
+    "numpy",
 ]
 
 [tool.uv]
